@@ -1,0 +1,28 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--imageSize", "128",
+                "--bs_secret", "44",
+                "--num_training", "1",
+                "--num_secret", "1",
+                "--num_cover", "1",
+                "--channel_cover", "3",
+                "--channel_secret", "3",
+                "--norm", "batch",
+                "--loss", "l2",
+                "--beta", "0.75",
+                "--remark", "main_udh"
+            ]
+        }
+    ]
+}
