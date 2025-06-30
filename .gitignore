@@ -6,3 +6,5 @@ qualitative_results/
 __pycache__/
 *.pyc
 training
+test_results
+test_logs

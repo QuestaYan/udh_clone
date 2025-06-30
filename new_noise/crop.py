@@ -103,6 +103,7 @@ if __name__ == "__main__":
 
     # Print the dimensions
     print("Original image size:", image_tensor.shape)
+    print(type(processed_jpeg))
     print("After noise processing:", processed_jpeg.shape)
 
     # Visualize the images

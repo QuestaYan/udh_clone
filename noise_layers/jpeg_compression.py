@@ -125,39 +125,66 @@ class JpegCompression(nn.Module):
         return image_conv_stacked
 
 
-    def forward(self, noised_and_cover):
+    # def forward(self, image_and_cover):
 
-        noised_image = noised_and_cover[0]
-        # pad the image so that we can do dct on 8x8 blocks
-        pad_height = (8 - noised_image.shape[2] % 8) % 8
-        pad_width = (8 - noised_image.shape[3] % 8) % 8
+    #     noised_image, _= image_and_cover  
+    #     # pad the image so that we can do dct on 8x8 blocks
+    #     pad_height = (8 - noised_image.shape[2] % 8) % 8
+    #     pad_width = (8 - noised_image.shape[3] % 8) % 8
 
-        noised_image = nn.ZeroPad2d((0, pad_width, 0, pad_height))(noised_image)
+    #     noised_image = nn.ZeroPad2d((0, pad_width, 0, pad_height))(noised_image)
 
-        # convert to yuv
-        image_yuv = torch.empty_like(noised_image)
-        rgb2yuv(noised_image, image_yuv)
+    #     # convert to yuv
+    #     image_yuv = torch.empty_like(noised_image)
+    #     rgb2yuv(noised_image, image_yuv)
 
+    #     assert image_yuv.shape[2] % 8 == 0
+    #     assert image_yuv.shape[3] % 8 == 0
+
+    #     # apply dct
+    #     image_dct = self.apply_conv(image_yuv, 'dct')
+    #     # get the jpeg-compression mask
+    #     mask = self.get_mask(image_dct.shape[1:])
+    #     # multiply the dct-ed image with the mask.
+    #     image_dct_mask = torch.mul(image_dct, mask)
+
+    #     # apply inverse dct (idct)
+    #     image_idct = self.apply_conv(image_dct_mask, 'idct')
+    #     # transform from yuv to to rgb
+    #     image_ret_padded = torch.empty_like(image_dct)
+    #     yuv2rgb(image_idct, image_ret_padded)
+
+    #     # un-pad
+    #     noised_and_cover[0] = image_ret_padded[:, :, :image_ret_padded.shape[2]-pad_height, :image_ret_padded.shape[3]-pad_width].clone()
+
+    #     return noised_and_cover
+    
+    def forward(self, image_and_cover):
+        image, _ = image_and_cover  # 忽略 cover_image，仅使用 image
+        # 填充图像以适应 8x8 DCT 块
+        pad_height = (8 - image.shape[2] % 8) % 8
+        pad_width = (8 - image.shape[3] % 8) % 8
+        image = nn.ZeroPad2d((0, pad_width, 0, pad_height))(image.to(self.device))
+        # 转换为 YUV 颜色空间
+        image_yuv = torch.empty_like(image)
+        rgb2yuv(image, image_yuv)  # 假设 rgb2yuv 已定义
         assert image_yuv.shape[2] % 8 == 0
         assert image_yuv.shape[3] % 8 == 0
-
-        # apply dct
-        image_dct = self.apply_conv(image_yuv, 'dct')
-        # get the jpeg-compression mask
-        mask = self.get_mask(image_dct.shape[1:])
-        # multiply the dct-ed image with the mask.
+        # 应用 DCT 变换
+        image_dct = self.apply_conv(image_yuv, 'dct')  # 假设 apply_conv 已定义
+        # 获取 JPEG 压缩掩码
+        mask = self.get_mask(image_dct.shape[1:])  # 假设 get_mask 已定义
+        # 应用掩码
         image_dct_mask = torch.mul(image_dct, mask)
-
-        # apply inverse dct (idct)
+        # 应用逆 DCT 变换
         image_idct = self.apply_conv(image_dct_mask, 'idct')
-        # transform from yuv to to rgb
+        # 转换回 RGB 颜色空间
         image_ret_padded = torch.empty_like(image_dct)
-        yuv2rgb(image_idct, image_ret_padded)
-
-        # un-pad
-        noised_and_cover[0] = image_ret_padded[:, :, :image_ret_padded.shape[2]-pad_height, :image_ret_padded.shape[3]-pad_width].clone()
-
-        return noised_and_cover
+        yuv2rgb(image_idct, image_ret_padded)  # 假设 yuv2rgb 已定义
+        # 移除填充
+        noised_image = image_ret_padded[:, :, :image_ret_padded.shape[2] - pad_height, 
+                                        :image_ret_padded.shape[3] - pad_width].clone()
+        return noised_image
     
     ###测试
 import os
@@ -180,15 +207,11 @@ if __name__ == "__main__":
     transform = transforms.ToTensor()
     image_tensor = transform(image).unsqueeze(0)  # Add batch dimension (1, C, H, W)
 
-
-
     # Create instances of Jpeg and JpegTest
     jpeg = JpegCompression(device=torch.device('cpu'))  # Adjust device as needed
 
-
     # Process the image
-    processed_jpeg = jpeg([image_tensor])[0]
-
+    processed_jpeg = jpeg([image_tensor,image_tensor])
 
     # Print the dimensions
     print("Original image size:", image_tensor.shape)

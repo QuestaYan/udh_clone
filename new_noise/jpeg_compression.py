@@ -156,8 +156,8 @@ class JpegCompression(nn.Module):
 
         # un-pad
         noised_and_cover[0] = image_ret_padded[:, :, :image_ret_padded.shape[2]-pad_height, :image_ret_padded.shape[3]-pad_width].clone()
-
-        return noised_and_cover
+        noised_img = noised_and_cover[0] if isinstance(noised_and_cover, (list, tuple)) else noised_and_cover
+        return noised_img
     
     ###测试
 import os
@@ -183,15 +183,16 @@ if __name__ == "__main__":
 
 
     # Create instances of Jpeg and JpegTest
-    jpeg = JpegCompression(device=torch.device('cpu'))  # Adjust device as needed
+    noise_layer = JpegCompression(device=torch.device('cpu'))  # Adjust device as needed
 
 
     # Process the image
-    processed_jpeg = jpeg([image_tensor])[0]
+    processed_jpeg = noise_layer([image_tensor,image_tensor])
 
 
     # Print the dimensions
     print("Original image size:", image_tensor.shape)
+    print(type(processed_jpeg))
     print("After Jpeg processing:", processed_jpeg.shape)
 
     # Visualize the images

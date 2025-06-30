@@ -12,7 +12,6 @@ import importlib
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader
-from new_noise import *
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', default="test", help='test dataset')
@@ -29,21 +28,21 @@ parser.add_argument('--bs_secret', type=int, default=8, help='batch size for sec
 parser.add_argument('--channel_cover', type=int, default=3, help='1: gray; 3: color')
 parser.add_argument('--channel_secret', type=int, default=3, help='1: gray; 3: color')
 parser.add_argument('--cover_dependent', type=bool, default=False, help='Whether secret depends on cover')
-parser.add_argument('--noise_type', type=str, default='salt_pepper_noise', help='Type of noise (e.g., gaussian, jpeg, etc.)')
+parser.add_argument('--noise_type', type=str, default='jpeg_compression', help='Type of noise (e.g., gaussian, jpeg, etc.)')
 parser.add_argument('--debug', type=bool, default=False, help='debug mode')
 parser.add_argument('--num_training', type=int, default=1, help='During training, how many cover images are used for one secret image')
 
 # Noise type mapping for unified parameter handling
 noise_class_map = {
-    'gaussian_noise': (GN, {'var': 0.001}),
-    'jpeg_compression': (JpegCompression, {'device': torch.device('cuda' if torch.cuda.is_available() else 'cpu')}),
-    'identity': (Identity, {}),
-    'gaussian_filter': (GF, {'sigma': 0.5}),
-    'middle_filter': (MF, {'kernel': 3}),
-    'crop': (Crop, {'height_ratio': 0.9, 'width_ratio': 0.9}),
-    'cropout': (Cropout, {'height_ratio': 0.5, 'width_ratio': 0.6}),
-    'dropout': (Dropout, {'prob': 0.1}),
-    'salt_pepper_noise': (SP, {'prob': 0.1})
+    'gaussian_noise': ('GN', {'var': 0.01}),
+    'jpeg_compression': ('JpegCompression', {'device': torch.device('cuda' if torch.cuda.is_available() else 'cpu')}),
+    'identity': ('Identity', {}),
+    'gaussian_filter': ('GF', {'sigma': 2}),
+    'middle_filter': ('MF', {'kernel': 5}),
+    'crop': ('Crop', {'height_ratio': 0.9, 'width_ratio': 0.9}),
+    'cropout': ('Cropout', {'height_ratio': 0.5, 'width_ratio': 0.6}),
+    'dropout': ('Dropout', {'prob': 0.1}),
+    'salt_pepper_noise': ('SP', {'prob': 0.1})
 }
 
 # Custom weights initialization
@@ -84,15 +83,12 @@ def forward_pass(secret_img, cover_img, Hnet, Rnet, criterion, device):
 
     # Apply noise attack
     if not opt.cover_dependent:
-        # print(opt.noise_type.upper())
-        # noise_module = importlib.import_module(f'new_noise.{opt.noise_type}')
-        # noise_class_name, noise_params = noise_class_map.get(opt.noise_type, (opt.noise_type.upper(), {}))#字典的 get 方法，返回键 opt.noise_type 对应的值。如果键不存在，返回默认值 (opt.noise_type.upper(), {})。
-        # # noise_class = getattr(noise_module, noise_class_name)
-        # noise_layer = noise_class_name(**noise_params)# noise_layer = noise_class(**noise_params)
-        noise_cls, noise_params = noise_class_map[opt.noise_type]
-        noise_layer = noise_cls(**noise_params)
+        print(opt.noise_type.upper())
+        noise_module = importlib.import_module(f'new_noise.{opt.noise_type}')
+        noise_class_name, noise_params = noise_class_map.get(opt.noise_type, (opt.noise_type.upper(), {}))#字典的 get 方法，返回键 opt.noise_type 对应的值。如果键不存在，返回默认值 (opt.noise_type.upper(), {})。
+        noise_class = getattr(noise_module, noise_class_name)
+        noise_layer = noise_class(**noise_params)
         noised_img = noise_layer([container_img, cover_imgv])
-
     else:
         noised_img = container_img.clone()
 
@@ -102,7 +98,7 @@ def forward_pass(secret_img, cover_img, Hnet, Rnet, criterion, device):
     diffR = (rev_secret_img_noised - secret_imgv).abs().mean() * 255
     return cover_imgv, container_img, noised_img, secret_imgv, rev_secret_img_noised, errH, errR, diffH, diffR
 
-
+# Modified: Analysis function to use rev_secret_img_noised only
 def analysis(test_loader, Hnet, Rnet, criterion, log_path, device):
     print("Starting analysis test...")
     Hnet.eval()
@@ -118,7 +114,7 @@ def analysis(test_loader, Hnet, Rnet, criterion, log_path, device):
 
         # Save qualitative results
         save_result_pic_analysis(
-            noised_img, cover_imgv, container_img,
+            opt.bs_secret * opt.num_training, cover_imgv, container_img,
             secret_imgv, rev_secret_img_noised, i, opt.testPics
         )
 
@@ -154,137 +150,55 @@ def analysis(test_loader, Hnet, Rnet, criterion, log_path, device):
         lpips_s_noised = model.forward(secret_imgv, rev_secret_img_noised).mean().item()
         print(f"Avg. LPIPS S (Noised): {lpips_s_noised:.4f}")
 
+        # # Cover Agnostic S'
+        # cover_img_zero = cover_img.clone().fill_(0.0)
+        # cover_imgv_s, container_img_s, noised_img_s, secret_imgv_s, rev_secret_img_noised_s, errH_s, errR_s, diffH_s, diffR_s = forward_pass(
+        #     secret_img, cover_img_zero, Hnet, Rnet, criterion, device
+        # )
+
+        # secret_img_numpy_s = secret_imgv_s.cpu().numpy().transpose(0, 2, 3, 1)
+        # rev_secret_noised_numpy_s = rev_secret_img_noised_s.cpu().numpy().transpose(0, 2, 3, 1)
+
+        # print("\nCover Agnostic S'")
+        # print(f"Secret APD S' (Noised): {diffR_s.item():.4f}")
+        # psnr_s_prime = np.mean([PSNR(secret_img_numpy_s[i], rev_secret_noised_numpy_s[i]) for i in range(N)])
+        # print(f"Avg. PSNR S' (Noised): {psnr_s_prime:.4f}")
+        # ssim_s_prime = np.mean([SSIM(secret_img_numpy_s[i], rev_secret_noised_numpy_s[i], channel_axis=-1, data_range=1.0) for i in range(N)])
+        # print(f"Avg. SSIM S' (Noised): {ssim_s_prime:.4f}")
+        # lpips_s_prime = model.forward(secret_imgv_s, rev_secret_img_noised_s).mean().item()
+        # print(f"Avg. LPIPS S' (Noised): {lpips_s_prime:.4f}")
+
         break  # Process only one batch for testing
 
 # Modified: Updated visualization to include noised_img and rev_secret_img_noised
-# def save_result_pic_analysis(noised_img, cover, container, secret, rev_secret,  i, save_path=None):
-#     path = os.path.join(save_path, 'qualitative_results')
-#     os.makedirs(path, exist_ok=True)
-#     resultImgName = os.path.join(path, 'universal_qualitative_results.png')  
-#     # path = './qualitative_results/'
-#     # if not os.path.exists(path):
-#     #     os.makedirs(path)
-#     # resultImgName = path + 'universal_qualitative_results.png'
-#     # ---------- （1）保存 noised_img ----------
-#     # 只取前 4 张 & clamp 到 [0,1] 方便查看
-#     noised_vis = noised_img[:4].clamp_(0.0, 1.0)
-#     # (B, C, H, W) → (行=1*4, …) 直接排成一行
-#     vutils.save_image(
-#         noised_vis,
-#         os.path.join(path, 'noised_imgs.png'),
-#         nrow=4,
-#         padding=1,
-#         normalize=False
-#     )
-#     # ---------- （2）综合图 ----------
-#     cover = cover[:4]
-#     container = container[:4]
-#     secret = secret[:4]
-#     rev_secret = rev_secret[:4]
-
-#     cover_gap = container - cover
-#     secret_gap = rev_secret - secret
-#     cover_gap = (cover_gap*10 + 0.5).clamp_(0.0, 1.0)
-#     secret_gap = (secret_gap*10 + 0.5).clamp_(0.0, 1.0)
-
-#     showCover = torch.cat((cover, container, cover_gap),0)
-#     showSecret = torch.cat((secret, rev_secret, secret_gap),0)
-
-#     showAll = torch.cat((showCover, showSecret),0)
-#     size = opt.imageSize
-#     showAll = showAll.reshape(6, 4, 3, size, size)
-#     showAll = showAll.permute(1, 0, 2, 3, 4)
-#     showAll = showAll.reshape(4*6, 3, size, size)
-#     vutils.save_image(showAll, resultImgName, nrow=6, padding=1, normalize=False)
-def save_result_pic_analysis(noised_img, cover, container,
-                             secret, rev_secret, i, save_path=None):
-    """
-    输出一张 8 列 × 4 行的综合示意图：
-    cover | container | cover_gap | secret | rev_secret | secret_gap | noised_img | noise_gap
-    并在最下方给每列加文字标签。
-    """
-    import torchvision.utils as vutils
-    from torchvision import transforms
-    from PIL import Image, ImageDraw, ImageFont
-
-    # ---------- 创建 / 定位目录 ----------
+def save_result_pic_analysis(bs_secret_times_num_training, cover, container, secret, rev_secret,  i, save_path=None):
     path = os.path.join(save_path, 'qualitative_results')
     os.makedirs(path, exist_ok=True)
-    result_img_path = os.path.join(path, 'universal_qualitative_results.png')
+    resultImgName = os.path.join(path, 'universal_qualitative_results.png')  
+    # path = './qualitative_results/'
+    # if not os.path.exists(path):
+    #     os.makedirs(path)
+    # resultImgName = path + 'universal_qualitative_results.png'
 
-    # ---------- 仅取前 4 张做可视化 ----------
-    cover       = cover[:4]
-    container   = container[:4]
-    secret      = secret[:4]
-    rev_secret  = rev_secret[:4]
-    noised_img  = noised_img[:4]
+    cover = cover[:4]
+    container = container[:4]
+    secret = secret[:4]
+    rev_secret = rev_secret[:4]
 
-    # ---------- 误差幅值放大后再 clamp ----------
-    cover_gap   = ((container - cover)       * 10 + 0.5).clamp_(0.0, 1.0)
-    secret_gap  = ((rev_secret - secret)     * 10 + 0.5).clamp_(0.0, 1.0)
-    noise_gap   = ((noised_img - container)  * 10 + 0.5).clamp_(0.0, 1.0)
+    cover_gap = container - cover
+    secret_gap = rev_secret - secret
+    cover_gap = (cover_gap*10 + 0.5).clamp_(0.0, 1.0)
+    secret_gap = (secret_gap*10 + 0.5).clamp_(0.0, 1.0)
 
-    # ---------- 依次拼接 8 个类别 ----------
-    show_all = torch.cat(
-        (cover,
-         container,
-         cover_gap,
-         secret,
-         rev_secret,
-         secret_gap,
-         noised_img,
-         noise_gap),
-        dim=0
-    )                                          # shape: (8*4, 3, H, W)
+    showCover = torch.cat((cover, container, cover_gap),0)
+    showSecret = torch.cat((secret, rev_secret, secret_gap),0)
 
-    # ---------- 重新排列，使同一张图片的 8 列并排 ----------
-    CATEGORIES = 8
-    BATCH      = 4
+    showAll = torch.cat((showCover, showSecret),0)
     size = opt.imageSize
-
-    show_all = show_all.reshape(CATEGORIES, BATCH, 3, size, size) \
-                         .permute(1, 0, 2, 3, 4) \
-                         .reshape(BATCH * CATEGORIES, 3, size, size)
-
-    # ---------- 使用 make_grid 生成网格 ----------
-    grid_tensor = vutils.make_grid(
-        show_all,
-        nrow=CATEGORIES,      # 每行放 8 张
-        padding=2,
-        normalize=False
-    )
-
-    # ---------- 将 Tensor 转成 PIL 以便写文字 ----------
-    grid_pil = transforms.ToPILImage()(grid_tensor.cpu())
-
-    # 额外留出文字区域
-    label_height = 22
-    labeled_img  = Image.new('RGB',
-                             (grid_pil.width, grid_pil.height + label_height),
-                             color=(255, 255, 255))
-    labeled_img.paste(grid_pil, (0, 0))
-
-    draw  = ImageDraw.Draw(labeled_img)
-    col_w = grid_pil.width // CATEGORIES
-    labels = ['cover', 'container', 'cover_gap',
-              'secret', 'rev_secret', 'secret_gap',
-              'noised', 'noise_gap']
-
-    # 尝试使用默认字体；若有特殊需求可替换
-    try:
-        font = ImageFont.load_default()
-    except Exception:
-        font = None
-
-    for idx, lab in enumerate(labels):
-        w, h = draw.textsize(lab, font=font)
-        x = int(col_w * idx + (col_w - w) / 2)
-        y = grid_pil.height + (label_height - h) // 2
-        draw.text((x, y), lab, fill=(0, 0, 0), font=font)
-
-    # ---------- 保存 ----------
-    labeled_img.save(result_img_path)
-
+    showAll = showAll.reshape(6, 4, 3, size, size)
+    showAll = showAll.permute(1, 0, 2, 3, 4)
+    showAll = showAll.reshape(4*6, 3, size, size)
+    vutils.save_image(showAll, resultImgName, nrow=6, padding=1, normalize=False)
 
 def main():
     global opt, logPath, DATA_DIR
